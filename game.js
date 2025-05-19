@@ -11,7 +11,42 @@ let gameOver = false;
 let score = 0;
 let level = 1;
 let lastShotTime = 0;
+let lastSpaceTime = 0;
 const shootCooldown = 200; // 발사 쿨다운 (밀리초)
+const doubleSpaceDelay = 300; // 연속 스페이스바 입력 감지 시간 (밀리초)
+
+// 레이저 시스템
+let lastLaserTime = 0;
+const laserCooldown = 10000; // 레이저 쿨다운 (10초)
+const laserDuration = 2000; // 레이저 지속시간 (2초)
+
+// 필살기 시스템
+let ultimateGauge = 0;
+const ultimateMaxGauge = 100;
+let ultimateActive = false;
+let lastUltimateTime = 0;
+const ultimateDuration = 3000; // 필살기 지속시간 (밀리초)
+
+// 보스 설정
+const bossConfig = {
+    width: 120,
+    height: 120,
+    health: 200,
+    maxHealth: 200,
+    speed: 3,
+    points: 2000,
+    color: '#ff0000',
+    attackCooldown: 800,
+    bulletSpeed: 6,
+    bulletSize: 12,
+    spawnScore: 500, // 보스 등장 점수
+    laserWidth: 30,
+    laserDamage: 20,
+    phase2Threshold: 0.5 // 2페이즈 진입 체력 비율
+};
+let boss = null;
+let bossLastAttack = 0;
+let bossWarningTimer = null;
 
 // 미사일 설정 추가
 const missileConfig = {
@@ -70,21 +105,26 @@ document.addEventListener('keydown', (e) => {
         resetGame();
     }
 
-    // 미사일 발사
+    // 스페이스바 연속 입력 감지
     const currentTime = Date.now();
-    // 미사일 발사
-    if (e.key === 'm' && !gameOver && currentTime - lastMissileTime > missileConfig.cooldown) {
-        lastMissileTime = currentTime;
-        missiles.push({
-            x: player.x + player.width / 2 - missileConfig.size / 2,
-            y: player.y,
-            width: missileConfig.size,
-            height: missileConfig.size * 2,
-            speed: missileConfig.speed,
-            color: missileConfig.color,
-            angle: -Math.PI / 2, // 초기 각도는 위쪽을 향함
-            target: null
-        });
+    if (e.key === ' ' && !gameOver) {
+        if (currentTime - lastSpaceTime < doubleSpaceDelay) {
+            // 연속 스페이스바 입력 감지됨 - 미사일 발사
+            if (currentTime - lastMissileTime > missileConfig.cooldown) {
+                lastMissileTime = currentTime;
+                missiles.push({
+                    x: player.x + player.width / 2 - missileConfig.size / 2,
+                    y: player.y,
+                    width: missileConfig.size,
+                    height: missileConfig.size * 2,
+                    speed: missileConfig.speed,
+                    color: missileConfig.color,
+                    angle: -Math.PI / 2, // 초기 각도는 위쪽을 향함
+                    target: null
+                });
+            }
+        }
+        lastSpaceTime = currentTime;
     }
 });
 document.addEventListener('keyup', (e) => keys[e.key] = false);
@@ -105,32 +145,65 @@ function resetGame() {
     enemies.length = 0;
     powerups.length = 0;
     missiles.length = 0;
+    boss = null;
+    bossWarningTimer = null;
+    lastLaserTime = 0;
     
     // UI 업데이트
     document.getElementById('scoreValue').textContent = score;
     document.getElementById('healthValue').textContent = player.health;
 }
 
-// 총알 발사
+// 레이저 공격 설정
+let isSpacePressed = false;
+let spaceHoldStartTime = 0;
+const laserChargeTime = 500; // 레이저 충전 시간 (밀리초)
+const laserConfig = {
+    width: 30,
+    damage: 3,
+    color: '#00ffff'
+};
+
+// 총알 발사와 필살기
 document.addEventListener('keydown', (e) => {
     const currentTime = Date.now();
-    if (e.key === ' ' && !gameOver && currentTime - lastShotTime > shootCooldown) {
-        lastShotTime = currentTime;
+    if (e.key === 'z' && !gameOver && ultimateGauge >= ultimateMaxGauge) {
+        // 필살기 발동
+        ultimateActive = true;
+        ultimateGauge = 0;
+        lastUltimateTime = currentTime;
+    } else if (e.key === ' ' && !gameOver && !isSpacePressed) {
+        isSpacePressed = true;
+        spaceHoldStartTime = currentTime;
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if (e.key === ' ') {
+        isSpacePressed = false;
+        const currentTime = Date.now();
         
-        // 파워 레벨에 따른 총알 패턴
-        switch(player.powerLevel) {
-            case 1:
-                bullets.push(createBullet(player.x + player.width / 2));
-                break;
-            case 2:
-                bullets.push(createBullet(player.x + player.width / 3));
-                bullets.push(createBullet(player.x + player.width * 2/3));
-                break;
-            case 3:
-                bullets.push(createBullet(player.x + player.width / 2));
-                bullets.push(createBullet(player.x + player.width / 4, -1));
-                bullets.push(createBullet(player.x + player.width * 3/4, 1));
-                break;
+        // 스페이스바를 짧게 눌렀을 때는 일반 총알 발사
+        if (currentTime - spaceHoldStartTime < laserChargeTime) {
+            if (currentTime - lastShotTime > shootCooldown) {
+                lastShotTime = currentTime;
+                
+                // 파워 레벨에 따른 총알 패턴
+                switch(player.powerLevel) {
+                    case 1:
+                        bullets.push(createBullet(player.x + player.width / 2));
+                        break;
+                    case 2:
+                        bullets.push(createBullet(player.x + player.width / 3));
+                        bullets.push(createBullet(player.x + player.width * 2/3));
+                        break;
+                    case 3:
+                        bullets.push(createBullet(player.x + player.width / 2));
+                        bullets.push(createBullet(player.x + player.width / 4, -1));
+                        bullets.push(createBullet(player.x + player.width * 3/4, 1));
+                        break;
+                }
+            }
         }
     }
 });
@@ -186,22 +259,49 @@ function spawnEnemy() {
 function checkCollisions() {
     // 총알과 적기 충돌
     bullets.forEach((bullet, bulletIndex) => {
-        enemies.forEach((enemy, enemyIndex) => {
-            if (checkCollision(bullet, enemy)) {
-                bullets.splice(bulletIndex, 1);
-                enemy.health--;
-                
-                // 적기 체력이 0이 되면 제거
-                if (enemy.health <= 0) {
-                    enemies.splice(enemyIndex, 1);
-                    score += enemy.points;
+        if (bullet.isLaser) {
+            // 레이저와 적기 충돌
+            enemies.forEach((enemy, enemyIndex) => {
+                if (enemy.x + enemy.width >= bullet.x && enemy.x <= bullet.x + bullet.width) {
+                    enemy.health -= bullet.damage;
+                    if (enemy.health <= 0) {
+                        enemies.splice(enemyIndex, 1);
+                        score += enemy.points;
+                        document.getElementById('scoreValue').textContent = score;
+                        createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                    }
+                }
+            });
+            // 레이저와 보스 충돌
+            if (boss && boss.x + boss.width >= bullet.x && boss.x <= bullet.x + bullet.width) {
+                boss.health -= bullet.damage;
+                createExplosion(bullet.x + bullet.width/2, boss.y + boss.height/2);
+                if (boss.health <= 0) {
+                    score += bossConfig.points;
                     document.getElementById('scoreValue').textContent = score;
-                    
-                    // 폭발 효과
-                    createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                    createExplosion(boss.x + boss.width/2, boss.y + boss.height/2);
+                    boss = null;
                 }
             }
-        });
+        } else {
+            // 일반 총알과 적기 충돌
+            enemies.forEach((enemy, enemyIndex) => {
+                if (checkCollision(bullet, enemy)) {
+                    bullets.splice(bulletIndex, 1);
+                    enemy.health--;
+                    
+                    // 적기 체력이 0이 되면 제거
+                    if (enemy.health <= 0) {
+                        enemies.splice(enemyIndex, 1);
+                        score += enemy.points;
+                        document.getElementById('scoreValue').textContent = score;
+                        
+                        // 폭발 효과
+                        createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                    }
+                }
+            });
+        }
     });
 
     // 플레이어와 적기 충돌
@@ -226,6 +326,79 @@ function draw() {
     // 화면 지우기
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 필살기 게이지 그리기
+    const gaugeWidth = 200;
+    const gaugeHeight = 10;
+    const gaugePercentage = ultimateGauge / ultimateMaxGauge;
+    
+    ctx.fillStyle = '#333';
+    ctx.fillRect(10, canvas.height - 30, gaugeWidth, gaugeHeight);
+    ctx.fillStyle = '#00ffff';
+    ctx.fillRect(10, canvas.height - 30, gaugeWidth * gaugePercentage, gaugeHeight);
+    
+    // 필살기 이펙트
+    if (ultimateActive) {
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // 레이저 빔 그리기
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(player.x + player.width / 2, player.y);
+        ctx.lineTo(player.x + player.width / 2, 0);
+        ctx.stroke();
+        
+        // 레이저 데미지 적용
+        enemies.forEach((enemy, index) => {
+            if (Math.abs(enemy.x + enemy.width/2 - (player.x + player.width/2)) < 30) {
+                enemy.health -= 5;
+                if (enemy.health <= 0) {
+                    enemies.splice(index, 1);
+                    score += enemy.points;
+                    document.getElementById('scoreValue').textContent = score;
+                    createExplosion(enemy.x + enemy.width/2, enemy.y);
+                }
+            }
+        });
+        
+        // 필살기 시간 체크
+        if (Date.now() - lastUltimateTime > ultimateDuration) {
+            ultimateActive = false;
+        }
+    }
+
+    // 보스 경고 메시지
+    if (bossWarningTimer !== null) {
+        const alpha = Math.sin(Date.now() / 200) * 0.5 + 0.5;
+        ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
+        ctx.font = '48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('⚠ 보스 등장 ⚠', canvas.width / 2, canvas.height / 2);
+    }
+
+    // 보스 그리기
+    if (boss) {
+        // 보스 체력바
+        const healthBarWidth = 200;
+        const healthBarHeight = 20;
+        const healthPercentage = boss.health / bossConfig.maxHealth;
+        
+        ctx.fillStyle = '#333';
+        ctx.fillRect(canvas.width/2 - healthBarWidth/2, 10, healthBarWidth, healthBarHeight);
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(canvas.width/2 - healthBarWidth/2, 10, healthBarWidth * healthPercentage, healthBarHeight);
+        
+        // 보스 본체
+        ctx.fillStyle = boss.color;
+        ctx.beginPath();
+        ctx.moveTo(boss.x + boss.width/2, boss.y);
+        ctx.lineTo(boss.x + boss.width, boss.y + boss.height);
+        ctx.lineTo(boss.x, boss.y + boss.height);
+        ctx.closePath();
+        ctx.fill();
+    }
 
     // 미사일 그리기
     missiles.forEach(missile => {
@@ -288,10 +461,27 @@ function draw() {
 
     // 총알 그리기
     bullets.forEach(bullet => {
-        ctx.fillStyle = bullet.color;
-        ctx.beginPath();
-        ctx.arc(bullet.x + bullet.width / 2, bullet.y + bullet.height / 2, bullet.width / 2, 0, Math.PI * 2);
-        ctx.fill();
+        if (bullet.isLaser) {
+            // 레이저 빔 그리기
+            ctx.fillStyle = bullet.color;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(bullet.x, bullet.y + bullet.height, bullet.width, -bullet.height);
+            
+            // 레이저 충돌 효과
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(bullet.x, bullet.y);
+            ctx.lineTo(bullet.x + bullet.width, bullet.y);
+            ctx.stroke();
+            
+            ctx.globalAlpha = 1.0;
+        } else {
+            ctx.fillStyle = bullet.color;
+            ctx.beginPath();
+            ctx.arc(bullet.x + bullet.width / 2, bullet.y + bullet.height / 2, bullet.width / 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
     });
 
     // 적기 그리기
@@ -319,6 +509,19 @@ function draw() {
     ctx.textAlign = 'left';
     ctx.fillText(`레벨: ${level}`, canvas.width - 100, 30);
 
+    // 레이저 쿨다운 표시
+    const currentTime = Date.now();
+    if (currentTime - lastLaserTime < laserCooldown) {
+        const cooldownPercentage = 1 - ((currentTime - lastLaserTime) / laserCooldown);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(10, canvas.height - 50, 200, 10);
+        ctx.fillStyle = '#00ffff';
+        ctx.fillRect(10, canvas.height - 50, 200 * cooldownPercentage, 10);
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.fillText('레이저 쿨다운', 10, canvas.height - 60);
+    }
+
     // 게임오버 메시지
     if (gameOver) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
@@ -335,8 +538,175 @@ function draw() {
 }
 
 // 게임 업데이트
+function spawnBoss() {
+    if (boss === null && score >= bossConfig.spawnScore) {
+        bossWarningTimer = setTimeout(() => {
+            boss = {
+                x: canvas.width / 2 - bossConfig.width / 2,
+                y: -bossConfig.height,
+                width: bossConfig.width,
+                height: bossConfig.height,
+                health: bossConfig.health,
+                speed: bossConfig.speed,
+                color: bossConfig.color,
+                pattern: 0,
+                direction: 1
+            };
+            bossWarningTimer = null;
+        }, 3000);
+    }
+}
+
+function updateBoss() {
+    if (boss) {
+        // 보스 이동 패턴
+        if (boss.y < 50) {
+            boss.y += boss.speed;
+        } else {
+            if (boss.health / bossConfig.maxHealth > bossConfig.phase2Threshold) {
+                // 1페이즈: 좌우 이동
+                boss.x += boss.speed * boss.direction;
+                if (boss.x <= 0 || boss.x + boss.width >= canvas.width) {
+                    boss.direction *= -1;
+                }
+            } else {
+                // 2페이즈: 대각선 이동
+                boss.x += boss.speed * 1.5 * boss.direction;
+                boss.y += Math.sin(Date.now() / 1000) * boss.speed;
+                if (boss.x <= 0 || boss.x + boss.width >= canvas.width) {
+                    boss.direction *= -1;
+                }
+                if (boss.y < 50 || boss.y > 150) {
+                    boss.y = boss.y < 50 ? 50 : 150;
+                }
+            }
+        }
+
+        // 보스 공격
+        const currentTime = Date.now();
+        if (currentTime - bossLastAttack > bossConfig.attackCooldown) {
+            bossLastAttack = currentTime;
+            
+            if (boss.health / bossConfig.maxHealth > bossConfig.phase2Threshold) {
+                // 1페이즈: 8방향 탄막
+                for (let i = 0; i < 8; i++) {
+                    const angle = (Math.PI * 2 * i) / 8;
+                    bullets.push({
+                        x: boss.x + boss.width/2,
+                        y: boss.y + boss.height/2,
+                        width: bossConfig.bulletSize,
+                        height: bossConfig.bulletSize,
+                        speed: bossConfig.bulletSpeed,
+                        color: '#ff3300',
+                        angle: angle,
+                        fromBoss: true
+                    });
+                }
+            } else {
+                // 2페이즈: 레이저 + 유도 미사일
+                // 레이저 공격
+                const laserAngle = Math.atan2(player.y - boss.y, player.x - boss.x);
+                bullets.push({
+                    x: boss.x + boss.width/2,
+                    y: boss.y + boss.height/2,
+                    width: bossConfig.laserWidth,
+                    height: canvas.height,
+                    speed: 0,
+                    color: '#ff0066',
+                    angle: laserAngle,
+                    fromBoss: true,
+                    isLaser: true,
+                    createTime: Date.now()
+                });
+                
+                // 유도 미사일 발사
+                for (let i = 0; i < 3; i++) {
+                    const angle = laserAngle + (Math.PI / 6) * (i - 1);
+                    bullets.push({
+                        x: boss.x + boss.width/2,
+                        y: boss.y + boss.height/2,
+                        width: bossConfig.bulletSize * 1.5,
+                        height: bossConfig.bulletSize * 1.5,
+                        speed: bossConfig.bulletSpeed * 0.8,
+                        color: '#ffff00',
+                        angle: angle,
+                        fromBoss: true,
+                        isHoming: true,
+                        targetX: player.x,
+                        targetY: player.y
+                    });
+                }
+            }
+        }
+
+        // 보스와 플레이어 총알/필살기 충돌 체크
+        bullets.forEach((bullet, index) => {
+            if (!bullet.fromBoss && checkCollision(bullet, boss)) {
+                bullets.splice(index, 1);
+                const damage = bullet.isUltimate ? 10 : 1;
+                boss.health -= damage;
+                createExplosion(bullet.x, bullet.y);
+
+                if (boss.health <= 0) {
+                    score += bossConfig.points;
+                    document.getElementById('scoreValue').textContent = score;
+                    createExplosion(boss.x + boss.width/2, boss.y + boss.height/2);
+                    
+                    // 특별 파워업 드롭
+                    powerups.push({
+                        x: boss.x + boss.width/2,
+                        y: boss.y + boss.height/2,
+                        width: 30,
+                        height: 30,
+                        speed: 1,
+                        color: '#ffff00',
+                        effect: 'power'
+                    });
+                    
+                    boss = null;
+                }
+            }
+        });
+
+        // 보스 총알과 플레이어 충돌 체크
+        bullets.forEach((bullet, index) => {
+            if (bullet.fromBoss && checkCollision(bullet, player)) {
+                bullets.splice(index, 1);
+                player.health -= 10;
+                document.getElementById('healthValue').textContent = player.health;
+                createExplosion(bullet.x, bullet.y);
+
+                if (player.health <= 0) {
+                    gameOver = true;
+                }
+            }
+        });
+    }
+}
+
 function update() {
     if (!gameOver) {
+        // 레이저 공격 처리
+        const currentTime = Date.now();
+        if (isSpacePressed && currentTime - spaceHoldStartTime >= laserChargeTime && currentTime - lastLaserTime >= laserCooldown) {
+            // 레이저 공격 생성
+            lastLaserTime = currentTime;
+            bullets.push({
+                x: player.x + player.width / 2 - laserConfig.width / 2,
+                y: player.y,
+                width: laserConfig.width,
+                height: -player.y, // 화면 상단까지
+                speed: 0,
+                color: laserConfig.color,
+                isLaser: true,
+                damage: laserConfig.damage,
+                createTime: currentTime
+            });
+        }
+        spawnBoss();
+        if (boss) {
+            updateBoss();
+        }
         // 미사일 이동
         missiles.forEach((missile, index) => {
             // 목표가 없거나 목표가 제거된 경우 가장 가까운 적 탐색
@@ -415,8 +785,20 @@ function update() {
         
         // 총알 이동
         bullets.forEach((bullet, index) => {
-            bullet.y -= bullet.speed;
-            bullet.x += bullet.speed * bullet.angle;
+            if (bullet.isLaser) {
+                if (Date.now() - bullet.createTime > 1000) {
+                    bullets.splice(index, 1);
+                }
+            } else if (bullet.isHoming) {
+                const dx = bullet.targetX - bullet.x;
+                const dy = bullet.targetY - bullet.y;
+                const angle = Math.atan2(dy, dx);
+                bullet.x += Math.cos(angle) * bullet.speed;
+                bullet.y += Math.sin(angle) * bullet.speed;
+            } else {
+                bullet.y -= bullet.speed;
+                bullet.x += bullet.speed * bullet.angle;
+            }
             if (bullet.y < 0 || bullet.x < 0 || bullet.x > canvas.width) {
                 bullets.splice(index, 1);
             }
@@ -440,9 +822,6 @@ function update() {
             
             if (enemy.y > canvas.height) {
                 enemies.splice(index, 1);
-                player.health -= 10;
-                document.getElementById('healthValue').textContent = player.health;
-                if (player.health <= 0) gameOver = true;
             }
         });
 
