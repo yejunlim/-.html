@@ -20,6 +20,18 @@ let lastLaserTime = 0;
 const laserCooldown = 10000; // 레이저 쿨다운 (10초)
 const laserDuration = 2000; // 레이저 지속시간 (2초)
 
+// 폭탄 시스템
+let lastBombTime = 0;
+const bombConfig = {
+    cooldown: 5000, // 폭탄 쿨다운 (5초)
+    speed: 5, // 폭탄 이동 속도
+    size: 15, // 폭탄 크기
+    explosionRadius: 150, // 폭발 범위
+    damage: 50, // 폭발 데미지
+    color: '#ff9900' // 폭탄 색상
+};
+const bombs = []; // 폭탄 배열
+
 // 필살기 시스템
 let ultimateGauge = 0;
 const ultimateMaxGauge = 100;
@@ -31,19 +43,21 @@ const ultimateDuration = 3000; // 필살기 지속시간 (밀리초)
 const bossConfig = {
     width: 120,
     height: 120,
-    health: 200,
-    maxHealth: 200,
-    speed: 3,
+    health: 150,
+    maxHealth: 150,
+    speed: 2,
     points: 2000,
     color: '#ff0000',
-    attackCooldown: 800,
-    bulletSpeed: 6,
+    attackCooldown: 1200,
+    bulletSpeed: 4,
     bulletSize: 12,
-    spawnScore: 500, // 보스 등장 점수
+    spawnInterval: 30000, // 보스 생성 간격 (30초)
     laserWidth: 30,
     laserDamage: 20,
-    phase2Threshold: 0.5 // 2페이즈 진입 체력 비율
+    phase2Threshold: 0.3, // 2페이즈 진입 체력 비율
+    spawnDelay: 3000 // 보스 경고 메시지 표시 시간 (3초)
 };
+let lastBossSpawnTime = 0; // 마지막 보스 생성 시간
 let boss = null;
 let bossLastAttack = 0;
 let bossWarningTimer = null;
@@ -97,12 +111,40 @@ const powerupTypes = {
 
 // 키 입력 처리
 const keys = {};
+let spaceKeyPressCount = 0;
+let lastSpaceKeyTime = 0;
+const spaceKeyTimeThreshold = 500; // 3연타 판정 시간 (밀리초)
+
 document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     
     // 게임 오버 상태에서 스페이스바로 재시작
     if (gameOver && e.key === ' ') {
         resetGame();
+    }
+
+    // 스페이스바 3연타로 폭탄 발사
+    if (e.key === ' ' && !gameOver) {
+        const currentTime = Date.now();
+        if (currentTime - lastSpaceKeyTime <= spaceKeyTimeThreshold) {
+            spaceKeyPressCount++;
+            if (spaceKeyPressCount >= 3 && currentTime - lastBombTime >= bombConfig.cooldown) {
+                lastBombTime = currentTime;
+                bombs.push({
+                    x: player.x + player.width / 2 - bombConfig.size / 2,
+                    y: player.y,
+                    width: bombConfig.size,
+                    height: bombConfig.size,
+                    speed: bombConfig.speed,
+                    color: bombConfig.color,
+                    exploded: false
+                });
+                spaceKeyPressCount = 0;
+            }
+        } else {
+            spaceKeyPressCount = 1;
+        }
+        lastSpaceKeyTime = currentTime;
     }
 
     // 스페이스바 연속 입력 감지
@@ -145,9 +187,11 @@ function resetGame() {
     enemies.length = 0;
     powerups.length = 0;
     missiles.length = 0;
+    bombs.length = 0;
     boss = null;
     bossWarningTimer = null;
     lastLaserTime = 0;
+    lastBossSpawnTime = 0;
     
     // UI 업데이트
     document.getElementById('scoreValue').textContent = score;
@@ -327,6 +371,13 @@ function draw() {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // 화면 흔들림 효과 적용
+    if (screenShake.active) {
+        const dx = Math.random() * screenShake.intensity * 2 - screenShake.intensity;
+        const dy = Math.random() * screenShake.intensity * 2 - screenShake.intensity;
+        ctx.setTransform(1, 0, 0, 1, dx, dy);
+    }
+
     // 필살기 게이지 그리기
     const gaugeWidth = 200;
     const gaugeHeight = 10;
@@ -459,6 +510,21 @@ function draw() {
     ctx.closePath();
     ctx.fill();
 
+    // 폭탄 그리기
+    bombs.forEach(bomb => {
+        // 폭탄 본체
+        ctx.fillStyle = bomb.color;
+        ctx.beginPath();
+        ctx.arc(bomb.x + bomb.width / 2, bomb.y + bomb.height / 2, bomb.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 폭발 범위 표시 (반투명 원)
+        ctx.fillStyle = 'rgba(255, 153, 0, 0.2)';
+        ctx.beginPath();
+        ctx.arc(bomb.x + bomb.width / 2, bomb.y + bomb.height / 2, bombConfig.explosionRadius, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
     // 총알 그리기
     bullets.forEach(bullet => {
         if (bullet.isLaser) {
@@ -509,8 +575,20 @@ function draw() {
     ctx.textAlign = 'left';
     ctx.fillText(`레벨: ${level}`, canvas.width - 100, 30);
 
-    // 레이저 쿨다운 표시
+    // 폭탄 쿨다운 표시
     const currentTime = Date.now();
+    if (currentTime - lastBombTime < bombConfig.cooldown) {
+        const bombCooldownPercentage = 1 - ((currentTime - lastBombTime) / bombConfig.cooldown);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(10, canvas.height - 70, 200, 10);
+        ctx.fillStyle = '#ff9900';
+        ctx.fillRect(10, canvas.height - 70, 200 * bombCooldownPercentage, 10);
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px Arial';
+        ctx.fillText('폭탄 쿨다운', 10, canvas.height - 80);
+    }
+
+    // 레이저 쿨다운 표시
     if (currentTime - lastLaserTime < laserCooldown) {
         const cooldownPercentage = 1 - ((currentTime - lastLaserTime) / laserCooldown);
         ctx.fillStyle = '#333';
@@ -539,7 +617,8 @@ function draw() {
 
 // 게임 업데이트
 function spawnBoss() {
-    if (boss === null && score >= bossConfig.spawnScore) {
+    const currentTime = Date.now();
+    if (!gameOver && boss === null && (currentTime - lastBossSpawnTime >= bossConfig.spawnInterval || lastBossSpawnTime === 0)) {
         bossWarningTimer = setTimeout(() => {
             boss = {
                 x: canvas.width / 2 - bossConfig.width / 2,
@@ -550,10 +629,12 @@ function spawnBoss() {
                 speed: bossConfig.speed,
                 color: bossConfig.color,
                 pattern: 0,
-                direction: 1
+                direction: 1,
+                hitCount: 0 // 보스가 맞은 횟수를 추적하는 카운터 추가
             };
             bossWarningTimer = null;
-        }, 3000);
+            lastBossSpawnTime = currentTime;
+        }, bossConfig.spawnDelay);
     }
 }
 
@@ -644,10 +725,12 @@ function updateBoss() {
             if (!bullet.fromBoss && checkCollision(bullet, boss)) {
                 bullets.splice(index, 1);
                 const damage = bullet.isUltimate ? 10 : 1;
+                boss.hitCount++; // 보스가 맞은 횟수 증가
                 boss.health -= damage;
                 createExplosion(bullet.x, bullet.y);
 
-                if (boss.health <= 0) {
+                // 100번째 공격이거나 체력이 0 이하일 때 보스 파괴
+                if (boss.hitCount >= 100 || boss.health <= 0) {
                     score += bossConfig.points;
                     document.getElementById('scoreValue').textContent = score;
                     createExplosion(boss.x + boss.width/2, boss.y + boss.height/2);
@@ -683,6 +766,14 @@ function updateBoss() {
         });
     }
 }
+
+// 화면 흔들림 효과 변수
+let screenShake = {
+    active: false,
+    intensity: 0,
+    duration: 0,
+    startTime: 0
+};
 
 function update() {
     if (!gameOver) {
@@ -857,8 +948,91 @@ function update() {
             level++;
         }
         
+        // 폭탄 업데이트
+        bombs.forEach((bomb, bombIndex) => {
+            if (!bomb.exploded) {
+                bomb.y += bomb.speed;
+                
+                // 화면 바닥에 닿으면 폭발
+                if (bomb.y > canvas.height - bomb.height) {
+                    // 적의 30%만 무작위로 제거
+                    const enemiesToRemove = Math.floor(enemies.length * 0.3);
+                    const shuffledEnemies = enemies.slice().sort(() => Math.random() - 0.5);
+                    
+                    for (let i = 0; i < enemiesToRemove; i++) {
+                        const enemyIndex = enemies.indexOf(shuffledEnemies[i]);
+                        if (enemyIndex !== -1) {
+                            score += shuffledEnemies[i].points;
+                            createExplosion(shuffledEnemies[i].x + shuffledEnemies[i].width/2, shuffledEnemies[i].y + shuffledEnemies[i].height/2);
+                            enemies.splice(enemyIndex, 1);
+                        }
+                    }
+                    document.getElementById('scoreValue').textContent = score;
+                    
+                    // 화면 전체에 폭발 효과
+                    createExplosion(canvas.width/2, canvas.height/2);
+                    createExplosion(canvas.width/4, canvas.height/2);
+                    createExplosion(canvas.width*3/4, canvas.height/2);
+                    
+                    bombs.splice(bombIndex, 1);
+                }
+            }
+        });
+
         spawnEnemy();
         checkCollisions();
+    }
+
+    // 화면 흔들림 효과 업데이트
+    if (screenShake.active) {
+        const elapsed = Date.now() - screenShake.startTime;
+        if (elapsed > screenShake.duration) {
+            screenShake.active = false;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+    }
+}
+
+// 폭탄 폭발 효과 생성
+function createBombExplosion(bomb) {
+    // 화면 흔들림 효과 시작
+    screenShake.active = true;
+    screenShake.intensity = 10;
+    screenShake.duration = 500;
+    screenShake.startTime = Date.now();
+
+    // 폭발 범위 내의 적에게 데미지
+    enemies.forEach((enemy, enemyIndex) => {
+        const dx = (bomb.x + bomb.width / 2) - (enemy.x + enemy.width / 2);
+        const dy = (bomb.y + bomb.height / 2) - (enemy.y + enemy.height / 2);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < bombConfig.explosionRadius) {
+            enemy.health -= bombConfig.damage;
+            if (enemy.health <= 0) {
+                enemies.splice(enemyIndex, 1);
+                score += enemy.points * 2;
+                document.getElementById('scoreValue').textContent = score;
+                createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+            }
+        }
+    });
+
+    // 보스에게 데미지
+    if (boss) {
+        const dx = (bomb.x + bomb.width / 2) - (boss.x + boss.width / 2);
+        const dy = (bomb.y + bomb.height / 2) - (boss.y + boss.height / 2);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < bombConfig.explosionRadius) {
+            boss.health -= bombConfig.damage / 2;
+            if (boss.health <= 0) {
+                score += bossConfig.points;
+                document.getElementById('scoreValue').textContent = score;
+                createExplosion(boss.x + boss.width/2, boss.y + boss.height/2);
+                boss = null;
+            }
+        }
     }
 }
 
