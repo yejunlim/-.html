@@ -1,3 +1,6 @@
+// 배경 음악 요소 가져오기
+const backgroundMusic = document.getElementById('backgroundMusic');
+
 // 게임 캔버스 설정
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -43,8 +46,8 @@ const ultimateDuration = 3000; // 필살기 지속시간 (밀리초)
 const bossConfig = {
     width: 120,
     height: 120,
-    health: 150,
-    maxHealth: 150,
+    health: 300,
+    maxHealth: 300,
     speed: 2,
     points: 2000,
     color: '#ff0000',
@@ -173,6 +176,10 @@ document.addEventListener('keyup', (e) => keys[e.key] = false);
 
 // 게임 재시작
 function resetGame() {
+    if (backgroundMusic) {
+        backgroundMusic.currentTime = 0;
+        backgroundMusic.play().catch(error => console.error("Error playing music on reset:", error));
+    }
     gameOver = false;
     score = 0;
     level = 1;
@@ -724,13 +731,13 @@ function updateBoss() {
         bullets.forEach((bullet, index) => {
             if (!bullet.fromBoss && checkCollision(bullet, boss)) {
                 bullets.splice(index, 1);
-                const damage = bullet.isUltimate ? 10 : 1;
+                const damage = bullet.isUltimate ? 10 : 3;
                 boss.hitCount++; // 보스가 맞은 횟수 증가
                 boss.health -= damage;
                 createExplosion(bullet.x, bullet.y);
 
                 // 100번째 공격이거나 체력이 0 이하일 때 보스 파괴
-                if (boss.hitCount >= 100 || boss.health <= 0) {
+                if (boss.health <= 0) {
                     score += bossConfig.points;
                     document.getElementById('scoreValue').textContent = score;
                     createExplosion(boss.x + boss.width/2, boss.y + boss.height/2);
@@ -747,6 +754,7 @@ function updateBoss() {
                     });
                     
                     boss = null;
+                    lastBossSpawnTime = Date.now(); // 다음 보스 생성 시간 설정
                 }
             }
         });
@@ -1078,6 +1086,11 @@ function drawExplosions() {
 }
 
 function gameLoop() {
+    if (gameOver && backgroundMusic) {
+        if (!backgroundMusic.paused) {
+            backgroundMusic.pause();
+        }
+    }
     update();
     updateExplosions();
     draw();
@@ -1087,3 +1100,22 @@ function gameLoop() {
 
 // 게임 시작
 gameLoop();
+
+if (backgroundMusic) {
+    // 페이지 로드 시 음악 재생 시도
+    const playPromise = backgroundMusic.play();
+    if (playPromise !== undefined) {
+        playPromise.then(_ => {
+            // 자동 재생 성공
+        }).catch(error => {
+            console.error("배경 음악 자동 재생 실패. 사용자 상호작용이 필요할 수 있습니다.", error);
+            // 사용자가 페이지와 상호작용할 때 음악을 재생하도록 유도할 수 있습니다.
+            // 예를 들어, 첫 클릭 시 재생
+            document.body.addEventListener('click', () => {
+                if (backgroundMusic.paused) {
+                    backgroundMusic.play().catch(e => console.error("클릭 후 음악 재생 실패:", e));
+                }
+            }, { once: true }); // 한 번만 실행되도록 설정
+        });
+    }
+}
